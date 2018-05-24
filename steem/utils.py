@@ -186,7 +186,7 @@ def is_comment(item):
     The item can be a Post object or just a raw comment object from the
     blockchain.
     """
-    return item['permlink'][:3] == "re-" and item['parent_author']
+    return item['parent_author'] != ""
 
 
 def time_elapsed(posting_time):
@@ -231,20 +231,16 @@ def remove_from_dict(obj, remove_keys=list()):
     return {k: v for k, v in items if k not in remove_keys}
 
 
-def construct_identifier(username_prefix='@', *args):
+def construct_identifier(*args):
     """ Create a post identifier from comment/post object or arguments.
 
     Examples:
 
         ::
-            construct_identifier('@', 'username', 'permlink')
-            construct_identifier('@', {'author': 'username',
+            construct_identifier('username', 'permlink')
+            construct_identifier({'author': 'username',
                 'permlink': 'permlink'})
     """
-    # https://github.com/steemit/steem-python/issues/165
-    # this is assert here will be removed with the above issue
-    # addressed.
-    assert(username_prefix == '@')
 
     if len(args) == 1:
         op = args[0]
@@ -255,8 +251,10 @@ def construct_identifier(username_prefix='@', *args):
         raise ValueError(
             'construct_identifier() received unparsable arguments')
 
-    fields = dict(prefix=username_prefix, author=author, permlink=permlink)
-    return "{prefix}{author}/{permlink}".format(**fields)
+    # remove the @ sign in case it was passed in by the user.
+    author = author.replace('@', '')
+    fields = dict(author=author, permlink=permlink)
+    return "{author}/{permlink}".format(**fields)
 
 
 def json_expand(json_op, key_name='json'):
@@ -292,7 +290,11 @@ def derive_permlink(title, parent_permlink=None):
 
 
 def resolve_identifier(identifier):
-    match = re.match("@?([\w\-\.]*)/([\w\-]*)", identifier)
+
+    # in case the user supplied the @ sign.
+    identifier = identifier.replace('@', '')
+
+    match = re.match("([\w\-\.]*)/([\w\-]*)", identifier)
     if not hasattr(match, "group"):
         raise ValueError("Invalid identifier")
     return match.group(1), match.group(2)
@@ -324,7 +326,7 @@ def fmt_time_from_now(secs=0):
 
 
 def env_unlocked():
-    """ Check if wallet password is provided as ENV variable. """
+    """ Check if wallet passphrase is provided as ENV variable. """
     return os.getenv('UNLOCK', False)
 
 
@@ -382,6 +384,29 @@ def compat_compose_dictionary(dictionary, **kwargs):
 
     return composed_dict
 
+
+def compat_json(data, ignore_dicts=False):
+    """
+
+    :param data: Json Data we want to ensure compatibility on.
+    :param ignore_dicts: should only be set to true when first called.
+    :return: Python compatible 2.7 byte-strings when encountering unicode.
+    """
+    # if this is a unicode string, return its string representation
+    if isinstance(data, unicode):
+        return data.encode('utf-8')
+    # if this is a list of values, return list of byte-string values
+    if isinstance(data, list):
+        return [compat_json(item, ignore_dicts=True) for item in data]
+    # if this is a dictionary, return dictionary of byte-string keys and values
+    # but only if we haven't already byte-string it
+    if isinstance(data, dict) and not ignore_dicts:
+        return {
+            compat_json(key, ignore_dicts=True): compat_json(value, ignore_dicts=True)
+            for key, value in data.iteritems()
+        }
+    # if it's anything else, return it in its original form
+    return data
 
 def compat_bytes(item, encoding=None):
     """
